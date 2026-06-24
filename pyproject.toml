@@ -1,0 +1,59 @@
+[project]
+name = "nnviz"
+version = "0.1.0"
+description = "Visualizing MNIST neural network training with hive plots"
+requires-python = ">=3.12"
+dependencies = [
+    "hiveplotlib",
+    "imageio",
+    "imageio-ffmpeg",
+    "matplotlib",
+    "mlflow",
+    "numpy",
+    "pandas",
+    "torch",
+    "torchvision",
+]
+
+[project.optional-dependencies]
+# datashader is only needed for the P2CP density mapping (M4); install with --extra viz then.
+viz = [
+    "hiveplotlib[datashader]",
+]
+dev = [
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nnviz*"]
+
+# Pin torch / torchvision to CPU-only wheels (no GPU needed for this net).
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py312"
+
+[tool.ruff.lint]
+# lighter than hiveplotlib's set on purpose; this is a throwaway prototype.
+extend-select = ["B", "C4", "I", "NPY", "PD", "PERF", "PTH", "RET", "SIM", "UP", "W"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 120
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

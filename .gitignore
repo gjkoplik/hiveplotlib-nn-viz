@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ruff_cache/
+.ipynb_checkpoints/
+uv.lock
+
+# data + experiment outputs
+data/
+mlruns/
+mlartifacts/
+mlflow.db
+mlflow.db-*
+frames/
+movies/
