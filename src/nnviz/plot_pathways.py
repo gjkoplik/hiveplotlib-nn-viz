@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import mlflow  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from hiveplotlib import Axis, BaseHivePlot, NodeCollection  # noqa: E402
+from hiveplotlib import BaseHivePlot, HivePlot, NodeCollection  # noqa: E402
 from hiveplotlib.viz.matplotlib import hive_plot_viz  # noqa: E402
 from mlflow.tracking import MlflowClient  # noqa: E402
 
@@ -27,41 +27,50 @@ from nnviz import animate, tracking  # noqa: E402
 from nnviz.model import LAYER_NAMES  # noqa: E402
 
 LAYER_LABELS = {"hidden1": "hidden 1", "hidden2": "hidden 2", "output": "output"}
-AXIS_ANGLES = {"hidden1": 90, "hidden2": 210, "output": 330}
+# rotation places hidden1 at the top (90 deg); the 3 axes spread evenly to 210 / 330.
+AXIS_ROTATION = 90
 FRAMES_DIR = Path("frames")
 MOVIES_DIR = Path("movies")
 EDGE_COLOR = "#2c3e50"
 
 
-def build_base(order: dict[str, np.ndarray]) -> BaseHivePlot:
-    """Build the hive plot scaffold (axes + nodes + frozen placements), no edges."""
+def build_plot(
+    order: dict[str, np.ndarray],
+    edges: np.ndarray | None = None,
+    *,
+    num_steps: int = 100,
+    **edge_kwargs,
+) -> HivePlot:
+    """One hive plot for a panel: layer axes, frozen node order, and the given edges.
+
+    Neurons are partitioned onto a hidden1 / hidden2 / output axis and frozen by
+    selectivity rank (``pos``). ``edges`` is an ``(n, 2)`` array of ``"layer:idx"`` id
+    pairs; ``HivePlot`` routes each pair to the correct axis pair from its endpoints'
+    layers, so the two hops (and any wrap-around) need not be split by the caller.
+    Uniform ``edge_kwargs`` (color, alpha, lw, ...) style every edge.
+    """
     rows = [
         {"unique_id": f"{layer}:{int(neuron)}", "layer": layer, "pos": rank}
         for layer in LAYER_NAMES
         for rank, neuron in enumerate(order[layer])
     ]
-    df = pd.DataFrame(rows)
-    hp = BaseHivePlot()
-    hp.add_axes(
-        [
-            Axis(
-                axis_id=layer,
-                start=1,
-                end=5,
-                angle=AXIS_ANGLES[layer],
-                long_name=LAYER_LABELS[layer],
-            )
+    nodes = NodeCollection(data=pd.DataFrame(rows), unique_id_column="unique_id")
+    if edges is None or len(edges) == 0:
+        edges = np.empty((0, 2), dtype=object)
+    return HivePlot(
+        nodes=nodes,
+        edges=np.asarray(edges, dtype=object),
+        partition_variable="layer",
+        sorting_variables="pos",
+        axes_order=list(LAYER_NAMES),
+        rotation=AXIS_ROTATION,
+        num_steps_per_edge=num_steps,
+        all_edge_kwargs=edge_kwargs or None,
+        axis_kwargs={
+            layer: {"start": 1, "end": 5, "long_name": LAYER_LABELS[layer]}
             for layer in LAYER_NAMES
-        ]
+        },
     )
-    hp.add_nodes(NodeCollection(data=df, unique_id_column="unique_id"))
-    for layer in LAYER_NAMES:
-        hp.place_nodes_on_axis(
-            axis_id=layer,
-            node_df=df[df["layer"] == layer],
-            sorting_feature_to_use="pos",
-        )
-    return hp
 
 
 def top_edges(weights: np.ndarray, src: str, dst: str, k_top: int) -> np.ndarray:
@@ -114,7 +123,7 @@ def _mark_output_node(ax: plt.Axes, base: BaseHivePlot, k: int) -> None:
 
 
 def render_frame(
-    base: BaseHivePlot,
+    order: dict[str, np.ndarray],
     class_act: dict[str, np.ndarray],
     step: int,
     out_path: Path,
@@ -124,28 +133,10 @@ def render_frame(
     """Render the 2x5 grid of per-digit pathways for one checkpoint."""
     fig, axes = plt.subplots(2, 5, figsize=(20, 8.5))
     for k, ax in enumerate(axes.flat):
-        hp = base.copy()
         e1, e2 = pathway_edges(class_act, k, top_h1h2, top_h2o)
-        if len(e1):
-            hp.connect_axes(
-                edges=e1,
-                axis_id_1="hidden1",
-                axis_id_2="hidden2",
-                a2_to_a1=False,
-                color=EDGE_COLOR,
-                alpha=0.45,
-                lw=1.0,
-            )
-        if len(e2):
-            hp.connect_axes(
-                edges=e2,
-                axis_id_1="hidden2",
-                axis_id_2="output",
-                a2_to_a1=False,
-                color=EDGE_COLOR,
-                alpha=0.45,
-                lw=1.0,
-            )
+        hp = build_plot(
+            order, np.vstack([e1, e2]), color=EDGE_COLOR, alpha=0.45, lw=1.0
+        )
         hive_plot_viz(
             hp,
             fig=fig,
@@ -153,7 +144,7 @@ def render_frame(
             show_axes_labels=False,
             node_kwargs={"color": "lightgray", "s": 5},
         )
-        _mark_output_node(ax, base, k)
+        _mark_output_node(ax, hp, k)
         ax.set_title(str(k), fontsize=14)
     fig.suptitle(f"activation pathways  ·  step {step}", fontsize=18)
     fig.text(
@@ -192,7 +183,7 @@ def main() -> None:
     order_path = mlflow.artifacts.download_artifacts(
         run_id=run_id, artifact_path="neuron_order.npz"
     )
-    base = build_base(dict(np.load(order_path)))
+    order = dict(np.load(order_path))
 
     steps = sorted(
         int(a.path.split("_")[-1]) for a in client.list_artifacts(run_id, "checkpoints")
@@ -210,7 +201,7 @@ def main() -> None:
             artifact_path=f"checkpoints/step_{step:06d}/class_activations.npz",
         )
         render_frame(
-            base,
+            order,
             dict(np.load(ca_path)),
             step,
             FRAMES_DIR / f"pathways_step_{step:06d}.png",

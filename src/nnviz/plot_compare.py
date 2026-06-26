@@ -29,7 +29,7 @@ from hiveplotlib.viz.datashader import datashade_edges_mpl  # noqa: E402
 from mlflow.tracking import MlflowClient  # noqa: E402
 
 from nnviz import tracking  # noqa: E402
-from nnviz.plot_pathways import _mark_output_node, build_base  # noqa: E402
+from nnviz.plot_pathways import _mark_output_node, build_plot  # noqa: E402
 
 FRAMES_DIR = Path("frames")
 # same colormap hiveplotlib's datashader viz uses by default, so both panels match
@@ -67,21 +67,13 @@ def class_paths(sa: dict[str, np.ndarray], digit: int, p: int, q: int) -> list:
     return paths
 
 
-def render_hive(ax: plt.Axes, base, paths: list, digit: int) -> None:
+def render_hive(ax: plt.Axes, order: dict, paths: list, digit: int) -> None:
     """Datashaded hive plot of the given paths (two hops as Bezier arcs)."""
-    hp = base.copy()
-    e1 = np.array([[f"hidden1:{a}", f"hidden2:{b}"] for a, b, _ in paths], dtype=object)
-    e2 = np.array([[f"hidden2:{b}", f"output:{c}"] for _, b, c in paths], dtype=object)
-    if len(e1):
-        hp.connect_axes(
-            edges=e1, axis_id_1="hidden1", axis_id_2="hidden2", a2_to_a1=False
-        )
-    if len(e2):
-        hp.connect_axes(
-            edges=e2, axis_id_1="hidden2", axis_id_2="output", a2_to_a1=False
-        )
+    edges = [[f"hidden1:{a}", f"hidden2:{b}"] for a, b, _ in paths]
+    edges += [[f"hidden2:{b}", f"output:{c}"] for _, b, c in paths]
+    hp = build_plot(order, np.array(edges, dtype=object) if edges else None)
     datashade_edges_mpl(hp, fig=ax.figure, ax=ax, pixel_spread=2)
-    _mark_output_node(ax, base, digit)
+    _mark_output_node(ax, hp, digit)
     ax.set_title(f"hive  ·  digit {digit}", fontsize=12)
 
 
@@ -165,14 +157,13 @@ def main() -> None:
             )
         )
     )
-    base = build_base(order)
     pos = layer_positions(order)
 
     fig, axes = plt.subplots(len(args.digits), 2, figsize=(8, 3.6 * len(args.digits)))
     axes = np.atleast_2d(axes)
     for r, digit in enumerate(args.digits):
         paths = class_paths(sa, digit, args.p, args.q)
-        render_hive(axes[r, 0], base, paths, digit)
+        render_hive(axes[r, 0], order, paths, digit)
         render_pcp(axes[r, 1], pos, paths, digit)
 
     fig.suptitle(f"same per-image edges, two layouts  ·  step {step}", fontsize=15)
